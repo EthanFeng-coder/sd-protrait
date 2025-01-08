@@ -1,0 +1,14 @@
+#sd web-ui.sh commont
+ bash webui.sh --listen --api
+
+#build the docker
+docker build -t sd-protrait .
+# run the container with mount
+docker run -d -p 8003:8003 -v /home/ef/Document/sd-protrait:/app --entrypoint /bin/bash sd-protrait:latest -c "tail -f /dev/null"
+# run the cootainer with mount and add local host
+docker run -d -p 8003:8003 \
+-v /home/ef/Document/sd-protrait:/app \
+--add-host=host.docker.internal:host-gateway \
+--entrypoint /bin/bash sd-protrait:latest -c "tail -f /dev/null"
+#run the app
+uvicorn app:app --host 0.0.0.0 --port 8003 --reload
