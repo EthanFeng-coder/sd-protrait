@@ -1,10 +1,16 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-import requests
+import httpx  # Use httpx for asynchronous HTTP requests
 from fastapi.responses import FileResponse
 import os
 import base64
 import spacy
+import aiofiles  # For asynchronous file handling
+import logging  # For logging debug information
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Load English and Chinese language models
 nlp_en = spacy.load("en_core_web_sm")
@@ -58,11 +64,12 @@ async def generate_scene_background(request: SceneBGRequest):
 
     # Check if the file already exists
     if os.path.exists(file_name):
-        print(f"File {file_name} already exists. Returning the existing URL.")
+        logger.debug(f"File {file_name} already exists. Returning the existing URL.")
         return {"message": "Scene background already exists", "file_url": f"/get-scenebg?scene_id={request.scene_id.strip()}"}
 
     # Extract nouns from the description
     extracted_nouns = extract_nouns_ignoring_names_and_capitalized(request.scene_description)
+    logger.debug(f"Extracted nouns: {extracted_nouns}")
 
     scene_name = request.scene_name if request.scene_name.strip() else "Unnamed scene"
 
@@ -110,23 +117,31 @@ async def generate_scene_background(request: SceneBGRequest):
         "sampler_index": "Euler"
     }
 
+    logger.debug(f"Payload being sent to Stable Diffusion API: {payload}")
+
     try:
-        # Call the Stable Diffusion API
-        response = requests.post(SD_API_URL, json=payload)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print("Error contacting Stable Diffusion API:", e)
-        raise HTTPException(status_code=500, detail="Failed to contact Stable Diffusion API")
+        # Call the Stable Diffusion API asynchronously using httpx
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.post(SD_API_URL, json=payload)
+            response.raise_for_status()
+            logger.debug(f"Stable Diffusion API response: {response.text}")
+    except httpx.RequestError as exc:
+        logger.error(f"Request Error: {exc}")
+        raise HTTPException(status_code=500, detail=f"Request Error: {exc}")
+    except httpx.HTTPStatusError as exc:
+        logger.error(f"HTTP Status Error: {exc.response.status_code} - {exc.response.text}")
+        raise HTTPException(status_code=500, detail=f"HTTP Status Error: {exc.response.status_code} - {exc.response.text}")
 
     # Process the response
     result = response.json()
     if "images" in result:
         image_data = base64.b64decode(result["images"][0])
-        with open(file_name, "wb") as f:
-            f.write(image_data)
+        async with aiofiles.open(file_name, "wb") as f:
+            await f.write(image_data)
         return {"message": "Scene background generated successfully",
                 "file_url": f"/get-scenebg?scene_id={request.scene_id.strip()}"}
     else:
+        logger.error("No 'images' found in the response from Stable Diffusion API")
         raise HTTPException(status_code=500, detail="Failed to generate scene background")
 
 
@@ -136,6 +151,7 @@ async def get_scene_background(scene_id: str = Query(..., description="Scene ID 
     file_name = f"data/scenebg/{scene_id.strip()}.png"
 
     if not os.path.exists(file_name):
+        logger.error(f"Background not found for scene_id: {scene_id.strip()}")
         raise HTTPException(status_code=404, detail="Background not found")
 
     return FileResponse(file_name, media_type="image/png")
