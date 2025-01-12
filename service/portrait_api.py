@@ -31,8 +31,8 @@ async def generate_portrait(request: PortraitRequest):
 
     # Check if the file already exists
     if os.path.exists(file_name):
-        print(f"File {file_name} already exists. Returning the existing image.")
-        return FileResponse(file_name, media_type="image/png")
+        print(f"File {file_name} already exists. Returning the existing URL.")
+        return {"message": "Image already exists", "file_url": f"/get-portrait?role_id={request.role_id.strip()}"}
 
     role_name = request.role_name if request.role_name.strip() else "Unnamed"
     role_background = request.role_background if request.role_background.strip() else "No background provided"
@@ -91,36 +91,25 @@ async def generate_portrait(request: PortraitRequest):
     # Debug: Print payload
     #print("Payload being sent to Stable Diffusion API:", payload)
 
-    # Call the Stable Diffusion API
     try:
+        # Call the Stable Diffusion API
         response = requests.post(SD_API_URL, json=payload)
-        print("Stable Diffusion API response status:", response.status_code)  # Debug
-        print("Stable Diffusion API response text:", response.text)  # Debug
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        print("Error contacting Stable Diffusion API:", e)  # Debug
-        raise HTTPException(status_code=500, detail=str(e))
+        print("Error contacting Stable Diffusion API:", e)
+        raise HTTPException(status_code=500, detail="Failed to contact Stable Diffusion API")
 
-    # Parse the response and save the image to a file
-    try:
-        result = response.json()
-        print("Stable Diffusion API JSON response:", result)  # Debug
-        if "images" in result:
-            image_data = result["images"][0]  # Base64 encoded image
-            image_bytes = base64.b64decode(image_data)
-            file_name = f"data/pic/{request.role_id.strip() if request.role_id.strip() else 'default'}.png"  # Use role_id or default
+        # Process the response
+    result = response.json()
+    if "images" in result:
+        image_data = base64.b64decode(result["images"][0])
+        with open(file_name, "wb") as f:
+            f.write(image_data)
+        return {"message": "Image generated successfully",
+                "file_url": f"/get-portrait?role_id={request.role_id.strip()}"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to generate image")
 
-            # Save the image to the file
-            with open(file_name, "wb") as f:
-                f.write(image_bytes)
-
-            return {"message": "Image generated successfully", "file_path": file_name}
-        else:
-            print("No images key in response:", result)  # Debug
-            raise HTTPException(status_code=500, detail="No images generated")
-    except ValueError as e:
-        print("Error parsing response JSON:", e)  # Debug
-        raise HTTPException(status_code=500, detail="Invalid response from Stable Diffusion API")
 
 
 @router.get("/get-portrait")

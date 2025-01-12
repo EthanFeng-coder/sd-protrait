@@ -20,7 +20,8 @@ RUN apt-get update && apt-get install -y \
     nohup \
     && rm -rf /var/lib/apt/lists/*
 
-
+RUN python -m spacy download en_core_web_sm && \
+    python -m spacy download zh_core_web_sm
 
 # Expose port 8003 to the outside world
 EXPOSE 8003
